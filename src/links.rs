@@ -70,9 +70,9 @@ pub fn find_platform_links(message: &str) -> Vec<PlatformLink<'_>> {
 }
 
 static INSTAGRAM_REEL_PATTERN: Lazy<Regex> =
-    regex_static::lazy_regex!(r"https?://(?:www\.)?instagram\.com/reel/(\w{1,20})/?(?:\?|\b)");
+    regex_static::lazy_regex!(r"https?://(?:www\.)?instagram\.com/reel/([\w-]{1,20})/?(?:\?|\b)");
 static INSTAGRAM_POST_PATTERN: Lazy<Regex> =
-    regex_static::lazy_regex!(r"https?://(?:www\.)?instagram\.com/p/(\w{1,20})/?(?:\?|\b)");
+    regex_static::lazy_regex!(r"https?://(?:www\.)?instagram\.com/p/([\w-]{1,20})/?(?:\?|\b)");
 // https://stackoverflow.com/questions/32543090/instagram-username-regex-php
 static INSTAGRAM_PROFILE_PATTERN: Lazy<Regex> =
     regex_static::lazy_regex!(r"https?://(?:www\.)?instagram\.com/(\w{1,30})/?(?:\?|\s|$)");
