@@ -1,5 +1,6 @@
 use std::env;
 
+use links::find_platform_links;
 use serenity::all::{CommandInteraction, CommandType, CreateCommand};
 use serenity::async_trait;
 use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
@@ -7,12 +8,25 @@ use serenity::model::application::{Command, Interaction};
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 
+mod links;
+
 const COMMAND_NAME: &str = "Alt URLs";
 
 async fn handle_alt_urls_command(ctx: Context, interaction: CommandInteraction) {
-    // TODO search for links in message and compose reply
+    let messages = interaction.data.resolved.messages.values();
+    let links = messages
+        .flat_map(|msg| find_platform_links(&msg.content))
+        .flat_map(|link| link.alternative_links())
+        .map(|link| link.to_string())
+        .collect::<Vec<_>>();
 
-    let data = CreateInteractionResponseMessage::new().content("hello world!");
+    let data = if links.is_empty() {
+        CreateInteractionResponseMessage::new()
+            .content("No supported links found in message :(")
+            .ephemeral(true)
+    } else {
+        CreateInteractionResponseMessage::new().content(links.join("\n"))
+    };
     let builder = CreateInteractionResponse::Message(data);
     if let Err(why) = interaction.create_response(&ctx.http, builder).await {
         println!("Cannot respond to slash command: {why}");
