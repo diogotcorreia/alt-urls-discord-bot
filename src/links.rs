@@ -1,7 +1,7 @@
-use std::fmt::Display;
+use std::{borrow::Cow, fmt::Display};
 
-use regex::Regex;
-use regex_static::once_cell::sync::Lazy;
+use linkify::{LinkFinder, LinkKind};
+use url::Url;
 
 pub enum Link {
     Simple(String),
@@ -18,14 +18,17 @@ impl Display for Link {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum PlatformLink<'a> {
-    InstagramReel(&'a str),
-    InstagramPost(&'a str),
-    InstagramProfile(&'a str),
-    YoutubeVideo(&'a str),
+pub enum PlatformLink {
+    InstagramReel(String),
+    InstagramPost(String),
+    InstagramProfile(String),
+    YoutubeVideo {
+        video_id: String,
+        timestamp: Option<u32>,
+    },
 }
 
-impl<'a> PlatformLink<'a> {
+impl PlatformLink {
     pub fn alternative_links(&self) -> Vec<Link> {
         match self {
             PlatformLink::InstagramReel(reel_id) => vec![
@@ -38,47 +41,90 @@ impl<'a> PlatformLink<'a> {
             PlatformLink::InstagramProfile(username) => vec![Link::Simple(format!(
                 "https://www.instagram.com/{username}/"
             ))],
-            PlatformLink::YoutubeVideo(video_id) => {
-                vec![Link::Simple(format!("https://youtu.be/{video_id}/"))]
+            PlatformLink::YoutubeVideo {
+                video_id,
+                timestamp,
+            } => {
+                if let Some(timestamp) = timestamp {
+                    vec![Link::Simple(format!(
+                        "https://youtu.be/{video_id}/?t={timestamp}"
+                    ))]
+                } else {
+                    vec![Link::Simple(format!("https://youtu.be/{video_id}/"))]
+                }
             }
         }
     }
 }
 
-pub fn find_platform_links(message: &str) -> Vec<PlatformLink<'_>> {
-    macro_rules! handle_pattern {
-        ($pattern: expr, $fn: expr) => {
-            $pattern
-                .captures_iter(message)
-                .map(|c| c.extract())
-                .for_each($fn)
-        };
-    }
-    let mut links_found = vec![];
+pub fn find_platform_links(message: &str) -> Vec<PlatformLink> {
+    LinkFinder::new()
+        .kinds(&[LinkKind::Url])
+        .links(message)
+        .map(|link| link.as_str())
+        .filter_map(|link| Url::parse(link).ok())
+        .filter(|url| url.scheme() == "https" || url.scheme() == "http")
+        .filter_map(|url| match url.domain() {
+            Some("instagram.com") | Some("www.instagram.com") => {
+                match url
+                    .path_segments()
+                    .map(|it| it.filter(|s| !s.is_empty()))
+                    .map(|mut it| [it.next(), it.next(), it.next()])
+                    .unwrap_or([None; 3])
+                {
+                    [Some("reel"), Some(reel_id), None] => {
+                        Some(PlatformLink::InstagramReel(reel_id.to_string()))
+                    }
+                    [Some("p"), Some(post_id), None] => {
+                        Some(PlatformLink::InstagramPost(post_id.to_string()))
+                    }
+                    [Some(profile_id), None, _] => {
+                        Some(PlatformLink::InstagramProfile(profile_id.to_string()))
+                    }
+                    _ => None,
+                }
+            }
+            Some("youtube.com") | Some("www.youtube.com") if url.path() == "/watch" => {
+                let mut video_id = None;
+                let mut timestamp = None;
+                for (key, value) in url.query_pairs() {
+                    match key {
+                        Cow::Borrowed("v") => video_id = Some(value.to_string()),
+                        Cow::Borrowed("t") => timestamp = value.parse().ok(),
+                        _ => {}
+                    }
+                }
 
-    handle_pattern!(INSTAGRAM_REEL_PATTERN, |(_, [reel_id])| links_found
-        .push(PlatformLink::InstagramReel(reel_id)));
-    handle_pattern!(INSTAGRAM_POST_PATTERN, |(_, [post_id])| links_found
-        .push(PlatformLink::InstagramPost(post_id)));
-    handle_pattern!(INSTAGRAM_PROFILE_PATTERN, |(_, [profile_id])| links_found
-        .push(PlatformLink::InstagramProfile(profile_id)));
+                video_id.map(|video_id| PlatformLink::YoutubeVideo {
+                    video_id,
+                    timestamp,
+                })
+            }
+            Some("youtu.be") => {
+                if let [Some(video_id), None] = url
+                    .path_segments()
+                    .map(|mut it| [it.next(), it.next()])
+                    .unwrap_or([None; 2])
+                {
+                    let mut timestamp = None;
+                    for (key, value) in url.query_pairs() {
+                        if let Cow::Borrowed("t") = key {
+                            timestamp = value.parse().ok()
+                        }
+                    }
 
-    handle_pattern!(YOUTUBE_VIDEO_PATTERN, |(_, [video_id])| links_found
-        .push(PlatformLink::YoutubeVideo(video_id)));
-
-    links_found
+                    Some(PlatformLink::YoutubeVideo {
+                        video_id: video_id.to_string(),
+                        timestamp,
+                    })
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .collect()
 }
-
-static INSTAGRAM_REEL_PATTERN: Lazy<Regex> =
-    regex_static::lazy_regex!(r"https?://(?:www\.)?instagram\.com/reel/([\w-]{1,20})/?(?:\?|\b)");
-static INSTAGRAM_POST_PATTERN: Lazy<Regex> =
-    regex_static::lazy_regex!(r"https?://(?:www\.)?instagram\.com/p/([\w-]{1,20})/?(?:\?|\b)");
-// https://stackoverflow.com/questions/32543090/instagram-username-regex-php
-static INSTAGRAM_PROFILE_PATTERN: Lazy<Regex> =
-    regex_static::lazy_regex!(r"https?://(?:www\.)?instagram\.com/(\w{1,30})/?(?:\?|\s|$)");
-static YOUTUBE_VIDEO_PATTERN: Lazy<Regex> = regex_static::lazy_regex!(
-    r"https?://youtu\.be/([\w-]{1,16})|https?://(?:www\.)?youtube\.com/watch\?v=([\w-]{1,16})"
-);
 
 #[cfg(test)]
 mod tests {
@@ -105,33 +151,50 @@ mod tests {
             https://www.instagram.com/lorem_ipsum
 
             Etiam ac nisl non quam aliquet ultrices eu consectetur magna.
+            https://youtube.com/channel?v=ABCD
+            https://www.youtube.com/channel?v=ABCD
             https://www.youtube.com/watch?v=AAAAA_AA-AA&feature=featured
-            https://www.youtube.com/watch?v=BBBBBBBBBBB
+            https://www.youtube.com/watch?v=BBBBBBBBBBB&t=1234
             http://youtube.com/watch?v=CCCCCCCCCCC
             https://youtu.be/DDDDDDDDDDD?si=ZZZZZZZZZZZZZZZZ
-            http://youtu.be/EEEEEEEEEEE
+            http://youtu.be/EEEEEEEEEEE?t=4321
             ";
 
         let links = find_platform_links(message);
 
         assert_eq!(
             vec![
-                PlatformLink::InstagramReel("AAAAAAAAAAA"),
-                PlatformLink::InstagramReel("BBBBBBBBBBB"),
-                PlatformLink::InstagramReel("CCCCCCCCCCC"),
-                PlatformLink::InstagramReel("DDDDDDDDDDD"),
-                PlatformLink::InstagramReel("EEEEEEEEEEE"),
-                PlatformLink::InstagramPost("AAAAAAAAAAA"),
-                PlatformLink::InstagramPost("BBBBBBBBBBB"),
-                PlatformLink::InstagramPost("CCCCCCCCCCC"),
-                PlatformLink::InstagramPost("DDDDDDDDDDD"),
-                PlatformLink::InstagramPost("EEEEEEEEEEE"),
-                PlatformLink::InstagramProfile("lorem_ipsum"),
-                PlatformLink::YoutubeVideo("AAAAA_AA-AA"),
-                PlatformLink::YoutubeVideo("BBBBBBBBBBB"),
-                PlatformLink::YoutubeVideo("CCCCCCCCCCC"),
-                PlatformLink::YoutubeVideo("DDDDDDDDDDD"),
-                PlatformLink::YoutubeVideo("EEEEEEEEEEE"),
+                PlatformLink::InstagramReel("AAAAAAAAAAA".to_string()),
+                PlatformLink::InstagramReel("BBBBBBBBBBB".to_string()),
+                PlatformLink::InstagramReel("CCCCCCCCCCC".to_string()),
+                PlatformLink::InstagramReel("DDDDDDDDDDD".to_string()),
+                PlatformLink::InstagramReel("EEEEEEEEEEE".to_string()),
+                PlatformLink::InstagramPost("AAAAAAAAAAA".to_string()),
+                PlatformLink::InstagramPost("BBBBBBBBBBB".to_string()),
+                PlatformLink::InstagramPost("CCCCCCCCCCC".to_string()),
+                PlatformLink::InstagramPost("DDDDDDDDDDD".to_string()),
+                PlatformLink::InstagramPost("EEEEEEEEEEE".to_string()),
+                PlatformLink::InstagramProfile("lorem_ipsum".to_string()),
+                PlatformLink::YoutubeVideo {
+                    video_id: "AAAAA_AA-AA".to_string(),
+                    timestamp: None,
+                },
+                PlatformLink::YoutubeVideo {
+                    video_id: "BBBBBBBBBBB".to_string(),
+                    timestamp: Some(1234),
+                },
+                PlatformLink::YoutubeVideo {
+                    video_id: "CCCCCCCCCCC".to_string(),
+                    timestamp: None,
+                },
+                PlatformLink::YoutubeVideo {
+                    video_id: "DDDDDDDDDDD".to_string(),
+                    timestamp: None,
+                },
+                PlatformLink::YoutubeVideo {
+                    video_id: "EEEEEEEEEEE".to_string(),
+                    timestamp: Some(4321),
+                },
             ],
             links
         )
