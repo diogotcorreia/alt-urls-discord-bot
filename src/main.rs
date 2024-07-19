@@ -4,21 +4,28 @@ use links::find_platform_links;
 use serenity::all::{CommandInteraction, CommandType, CreateCommand};
 use serenity::async_trait;
 use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
+use serenity::futures::future;
 use serenity::model::application::{Command, Interaction};
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 
 mod links;
+mod reddit;
 
 const COMMAND_NAME: &str = "Alt URLs";
 
 async fn handle_alt_urls_command(ctx: Context, interaction: CommandInteraction) {
     let messages = interaction.data.resolved.messages.values();
-    let links = messages
-        .flat_map(|msg| find_platform_links(&msg.content))
-        .flat_map(|link| link.alternative_links())
-        .map(|link| link.to_string())
-        .collect::<Vec<_>>();
+    let links = future::join_all(
+        messages
+            .flat_map(|msg| find_platform_links(&msg.content))
+            .map(|link| link.alternative_links()),
+    )
+    .await
+    .iter()
+    .flatten()
+    .map(|link| link.to_string())
+    .collect::<Vec<_>>();
 
     let data = if links.is_empty() {
         CreateInteractionResponseMessage::new()

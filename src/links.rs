@@ -3,6 +3,8 @@ use std::{borrow::Cow, fmt::Display};
 use linkify::{LinkFinder, LinkKind};
 use url::Url;
 
+use crate::reddit::{alternative_reddit_links, resolve_reddit_share_link};
+
 pub enum Link {
     Simple(String),
     Embed(String),
@@ -26,10 +28,19 @@ pub enum PlatformLink {
         video_id: String,
         timestamp: Option<u32>,
     },
+    RedditShareLink {
+        subreddit: String,
+        share_id: String,
+    },
+    RedditPost {
+        subreddit: String,
+        post_id: String,
+        comment_id: Option<String>,
+    },
 }
 
 impl PlatformLink {
-    pub fn alternative_links(&self) -> Vec<Link> {
+    pub async fn alternative_links(self) -> Vec<Link> {
         match self {
             PlatformLink::InstagramReel(reel_id) => vec![
                 Link::Embed(format!("https://www.ddinstagram.com/reel/{reel_id}/")),
@@ -53,6 +64,26 @@ impl PlatformLink {
                     vec![Link::Simple(format!("https://youtu.be/{video_id}/"))]
                 }
             }
+            PlatformLink::RedditShareLink {
+                subreddit,
+                share_id,
+            } => {
+                if let Some(PlatformLink::RedditPost {
+                    subreddit,
+                    post_id,
+                    comment_id,
+                }) = resolve_reddit_share_link(&subreddit, &share_id).await
+                {
+                    alternative_reddit_links(&subreddit, &post_id, comment_id.as_deref())
+                } else {
+                    vec![]
+                }
+            }
+            PlatformLink::RedditPost {
+                subreddit,
+                post_id,
+                comment_id,
+            } => alternative_reddit_links(&subreddit, &post_id, comment_id.as_deref()),
         }
     }
 }
@@ -63,67 +94,109 @@ pub fn find_platform_links(message: &str) -> Vec<PlatformLink> {
         .links(message)
         .map(|link| link.as_str())
         .filter_map(|link| Url::parse(link).ok())
-        .filter(|url| url.scheme() == "https" || url.scheme() == "http")
-        .filter_map(|url| match url.domain() {
-            Some("instagram.com") | Some("www.instagram.com") => {
-                match url
-                    .path_segments()
-                    .map(|it| it.filter(|s| !s.is_empty()))
-                    .map(|mut it| [it.next(), it.next(), it.next()])
-                    .unwrap_or([None; 3])
-                {
-                    [Some("reel"), Some(reel_id), None] => {
-                        Some(PlatformLink::InstagramReel(reel_id.to_string()))
-                    }
-                    [Some("p"), Some(post_id), None] => {
-                        Some(PlatformLink::InstagramPost(post_id.to_string()))
-                    }
-                    [Some(profile_id), None, _] => {
-                        Some(PlatformLink::InstagramProfile(profile_id.to_string()))
-                    }
-                    _ => None,
+        .filter_map(get_platform_link)
+        .collect()
+}
+
+pub fn get_platform_link(url: Url) -> Option<PlatformLink> {
+    if url.scheme() != "https" && url.scheme() != "http" {
+        return None;
+    }
+
+    match url.domain() {
+        Some("instagram.com") | Some("www.instagram.com") => {
+            match url
+                .path_segments()
+                .map(|it| it.filter(|s| !s.is_empty()))
+                .map(|mut it| [it.next(), it.next(), it.next()])
+                .unwrap_or([None; 3])
+            {
+                [Some("reel"), Some(reel_id), None] => {
+                    Some(PlatformLink::InstagramReel(reel_id.to_string()))
+                }
+                [Some("p"), Some(post_id), None] => {
+                    Some(PlatformLink::InstagramPost(post_id.to_string()))
+                }
+                [Some(profile_id), None, _] => {
+                    Some(PlatformLink::InstagramProfile(profile_id.to_string()))
+                }
+                _ => None,
+            }
+        }
+        Some("youtube.com") | Some("www.youtube.com") if url.path() == "/watch" => {
+            let mut video_id = None;
+            let mut timestamp = None;
+            for (key, value) in url.query_pairs() {
+                match key {
+                    Cow::Borrowed("v") => video_id = Some(value.to_string()),
+                    Cow::Borrowed("t") => timestamp = value.parse().ok(),
+                    _ => {}
                 }
             }
-            Some("youtube.com") | Some("www.youtube.com") if url.path() == "/watch" => {
-                let mut video_id = None;
+
+            video_id.map(|video_id| PlatformLink::YoutubeVideo {
+                video_id,
+                timestamp,
+            })
+        }
+        Some("youtu.be") => {
+            if let [Some(video_id), None] = url
+                .path_segments()
+                .map(|it| it.filter(|s| !s.is_empty()))
+                .map(|mut it| [it.next(), it.next()])
+                .unwrap_or([None; 2])
+            {
                 let mut timestamp = None;
                 for (key, value) in url.query_pairs() {
-                    match key {
-                        Cow::Borrowed("v") => video_id = Some(value.to_string()),
-                        Cow::Borrowed("t") => timestamp = value.parse().ok(),
-                        _ => {}
+                    if let Cow::Borrowed("t") = key {
+                        timestamp = value.parse().ok()
                     }
                 }
 
-                video_id.map(|video_id| PlatformLink::YoutubeVideo {
-                    video_id,
+                Some(PlatformLink::YoutubeVideo {
+                    video_id: video_id.to_string(),
                     timestamp,
                 })
+            } else {
+                None
             }
-            Some("youtu.be") => {
-                if let [Some(video_id), None] = url
-                    .path_segments()
-                    .map(|mut it| [it.next(), it.next()])
-                    .unwrap_or([None; 2])
-                {
-                    let mut timestamp = None;
-                    for (key, value) in url.query_pairs() {
-                        if let Cow::Borrowed("t") = key {
-                            timestamp = value.parse().ok()
-                        }
-                    }
-
-                    Some(PlatformLink::YoutubeVideo {
-                        video_id: video_id.to_string(),
-                        timestamp,
+        }
+        Some("reddit.com") | Some("www.reddit.com") => {
+            match url
+                .path_segments()
+                .map(|it| it.filter(|s| !s.is_empty()))
+                .map(|mut it| [None; 7].map(|_: Option<&str>| it.next()))
+                .unwrap_or([None; 7])
+            {
+                // /r/<subreddit>/s/<share_id>
+                [Some("r"), Some(subreddit), Some("s"), Some(share_id), None, ..] => {
+                    Some(PlatformLink::RedditShareLink {
+                        subreddit: subreddit.to_string(),
+                        share_id: share_id.to_string(),
                     })
-                } else {
-                    None
                 }
+                // /r/<subreddit>/comments/<post_id>/comment/<comment_id>
+                [Some("r"), Some(subreddit), Some("comments"), Some(post_id), Some("comment"), Some(comment_id), None] => {
+                    Some(PlatformLink::RedditPost {
+                        subreddit: subreddit.to_string(),
+                        post_id: post_id.to_string(),
+                        comment_id: Some(comment_id.to_string()),
+                    })
+                }
+                // /r/<subreddit>/comments/<post_id>/<perhaps post name>
+                [Some("r"), Some(subreddit), Some("comments"), Some(post_id), Some(_), None, ..]
+                | [Some("r"), Some(subreddit), Some("comments"), Some(post_id), None, ..] => {
+                    Some(PlatformLink::RedditPost {
+                        subreddit: subreddit.to_string(),
+                        post_id: post_id.to_string(),
+                        comment_id: None,
+                    })
+                }
+                _ => None,
             }
-            _ => None,
-        })
-        .collect()
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -158,6 +231,10 @@ mod tests {
             http://youtube.com/watch?v=CCCCCCCCCCC
             https://youtu.be/DDDDDDDDDDD?si=ZZZZZZZZZZZZZZZZ
             http://youtu.be/EEEEEEEEEEE?t=4321
+
+            Pellentesque neque quam, vulputate id ornare quis, lobortis id lacus.
+            https://www.reddit.com/r/subreddit/comments/AAAAAAA/some_post_name/?share_id=ZZZZZZZZZZZZZZZZZZZZZ&utm_content=1&utm_medium=ios_app&utm_name=ioscss&utm_source=share&utm_term=1
+            https://www.reddit.com/r/subreddit/comments/AAAAAAA/comment/BBBBBBB/
             ";
 
         let links = find_platform_links(message);
@@ -195,6 +272,16 @@ mod tests {
                     video_id: "EEEEEEEEEEE".to_string(),
                     timestamp: Some(4321),
                 },
+                PlatformLink::RedditPost {
+                    subreddit: "subreddit".to_string(),
+                    post_id: "AAAAAAA".to_string(),
+                    comment_id: None,
+                },
+                PlatformLink::RedditPost {
+                    subreddit: "subreddit".to_string(),
+                    post_id: "AAAAAAA".to_string(),
+                    comment_id: Some("BBBBBBB".to_string()),
+                }
             ],
             links
         )

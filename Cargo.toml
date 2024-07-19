@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 linkify = "0.10.0"
+reqwest = { version = "0.12.5", default-features = false, features = ["rustls-tls"] }
 serenity = { version = "0.12.2", default-features = false, features = ["client", "gateway", "rustls_backend", "model", "collector"] }
 tokio = { version = "1.38.1", features = ["macros", "rt-multi-thread"] }
 url = "2.5.2"
