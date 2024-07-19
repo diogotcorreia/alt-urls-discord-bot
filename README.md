@@ -15,3 +15,7 @@ https://discord.com/oauth2/authorize?client_id=1263621336979210240&permissions=0
     - Embeds reels with ddinstagram.com
 - Youtube Videos
     - Removes tracking parameters
+- Reddit Post and Share Links
+    - Resolves the true URL behind Reddit share links
+    - Adds old reddit link
+    - Removes tracking parameters
