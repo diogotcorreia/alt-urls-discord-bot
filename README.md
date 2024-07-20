@@ -12,7 +12,7 @@ https://discord.com/oauth2/authorize?client_id=1263621336979210240&permissions=0
 
 - Instagram Reels/Posts/Profiles
     - Removes tracking parameters
-    - Embeds reels with ddinstagram.com
+    - Embeds reels/posts with ddinstagram.com
 - Youtube Videos
     - Removes tracking parameters
 - Reddit Post and Share Links

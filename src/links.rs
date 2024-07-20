@@ -46,9 +46,10 @@ impl PlatformLink {
                 Link::Embed(format!("https://www.ddinstagram.com/reel/{reel_id}/")),
                 Link::Simple(format!("https://www.instagram.com/reel/{reel_id}/")),
             ],
-            PlatformLink::InstagramPost(post_id) => vec![Link::Simple(format!(
-                "https://www.instagram.com/p/{post_id}/"
-            ))],
+            PlatformLink::InstagramPost(post_id) => vec![
+                Link::Simple(format!("https://www.ddinstagram.com/p/{post_id}/")),
+                Link::Simple(format!("https://www.instagram.com/p/{post_id}/")),
+            ],
             PlatformLink::InstagramProfile(username) => vec![Link::Simple(format!(
                 "https://www.instagram.com/{username}/"
             ))],
