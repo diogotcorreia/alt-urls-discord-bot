@@ -19,3 +19,6 @@ https://discord.com/oauth2/authorize?client_id=1263621336979210240&permissions=0
     - Resolves the true URL behind Reddit share links
     - Adds old reddit link
     - Removes tracking parameters
+- Tweets
+    - Embeds tweets with fxtwitter.com
+    - Removes tracking parameters

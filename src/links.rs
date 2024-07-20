@@ -37,6 +37,10 @@ pub enum PlatformLink {
         post_id: String,
         comment_id: Option<String>,
     },
+    Tweet {
+        username: String,
+        status_id: u64,
+    },
 }
 
 impl PlatformLink {
@@ -85,6 +89,15 @@ impl PlatformLink {
                 post_id,
                 comment_id,
             } => alternative_reddit_links(&subreddit, &post_id, comment_id.as_deref()),
+            PlatformLink::Tweet {
+                username,
+                status_id,
+            } => vec![
+                Link::Embed(format!(
+                    "https://fxtwitter.com/{username}/status/{status_id}"
+                )),
+                Link::Simple(format!("https://x.com/{username}/status/{status_id}")),
+            ],
         }
     }
 }
@@ -196,6 +209,21 @@ pub fn get_platform_link(url: Url) -> Option<PlatformLink> {
                 _ => None,
             }
         }
+        Some("twitter.com") | Some("www.twitter.com") | Some("x.com") | Some("www.x.com") => {
+            if let [Some(username), Some("status"), Some(status_id), None] = url
+                .path_segments()
+                .map(|it| it.filter(|s| !s.is_empty()))
+                .map(|mut it| [None; 4].map(|_: Option<&str>| it.next()))
+                .unwrap_or([None; 4])
+            {
+                Some(PlatformLink::Tweet {
+                    username: username.to_string(),
+                    status_id: status_id.parse().ok()?,
+                })
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -236,6 +264,10 @@ mod tests {
             Pellentesque neque quam, vulputate id ornare quis, lobortis id lacus.
             https://www.reddit.com/r/subreddit/comments/AAAAAAA/some_post_name/?share_id=ZZZZZZZZZZZZZZZZZZZZZ&utm_content=1&utm_medium=ios_app&utm_name=ioscss&utm_source=share&utm_term=1
             https://www.reddit.com/r/subreddit/comments/AAAAAAA/comment/BBBBBBB/
+
+            Morbi varius augue quis sem efficitur posuere.
+            https://x.com/johndoe/status/123456789123456
+            https://twitter.com/janedoe/status/988644234135645
             ";
 
         let links = find_platform_links(message);
@@ -282,7 +314,15 @@ mod tests {
                     subreddit: "subreddit".to_string(),
                     post_id: "AAAAAAA".to_string(),
                     comment_id: Some("BBBBBBB".to_string()),
-                }
+                },
+                PlatformLink::Tweet {
+                    username: "johndoe".to_string(),
+                    status_id: 123456789123456,
+                },
+                PlatformLink::Tweet {
+                    username: "janedoe".to_string(),
+                    status_id: 988644234135645,
+                },
             ],
             links
         )
