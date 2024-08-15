@@ -3,7 +3,7 @@
 use reqwest::{header::LOCATION, redirect, Client};
 use url::Url;
 
-use super::{get_platform_link, Link, PlatformLink};
+use super::{Link, PlatformLink};
 
 pub async fn resolve_reddit_share_link(subreddit: &str, share_id: &str) -> Option<PlatformLink> {
     let client = Client::builder()
@@ -22,7 +22,9 @@ pub async fn resolve_reddit_share_link(subreddit: &str, share_id: &str) -> Optio
     dbg!(&real_link);
 
     // filter to avoid infinite recursion
-    get_platform_link(real_link).filter(|pl| matches!(pl, PlatformLink::RedditPost { .. }))
+    PlatformLink::try_from(real_link)
+        .ok()
+        .filter(|pl| matches!(pl, PlatformLink::RedditPost { .. }))
 }
 
 pub fn alternative_reddit_links(

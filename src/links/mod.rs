@@ -109,123 +109,137 @@ pub fn find_platform_links(message: &str) -> Vec<PlatformLink> {
         .links(message)
         .map(|link| link.as_str())
         .filter_map(|link| Url::parse(link).ok())
-        .filter_map(get_platform_link)
+        .map(PlatformLink::try_from)
+        .filter_map(|maybe_link| maybe_link.ok())
         .collect()
 }
 
-pub fn get_platform_link(url: Url) -> Option<PlatformLink> {
-    if url.scheme() != "https" && url.scheme() != "http" {
-        return None;
+pub struct Unsupported;
+impl Display for Unsupported {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Unsupported link")
     }
+}
 
-    match url.domain() {
-        Some("instagram.com") | Some("www.instagram.com") => {
-            match url
-                .path_segments()
-                .map(|it| it.filter(|s| !s.is_empty()))
-                .map(|mut it| [it.next(), it.next(), it.next()])
-                .unwrap_or([None; 3])
-            {
-                [Some("reel"), Some(reel_id), None] => {
-                    Some(PlatformLink::InstagramReel(reel_id.to_string()))
-                }
-                [Some("p"), Some(post_id), None] => {
-                    Some(PlatformLink::InstagramPost(post_id.to_string()))
-                }
-                [Some(profile_id), None, _] => {
-                    Some(PlatformLink::InstagramProfile(profile_id.to_string()))
-                }
-                _ => None,
-            }
-        }
-        Some("youtube.com") | Some("www.youtube.com") if url.path() == "/watch" => {
-            let mut video_id = None;
-            let mut timestamp = None;
-            for (key, value) in url.query_pairs() {
-                match key {
-                    Cow::Borrowed("v") => video_id = Some(value.to_string()),
-                    Cow::Borrowed("t") => timestamp = value.parse().ok(),
-                    _ => {}
-                }
-            }
+impl TryFrom<Url> for PlatformLink {
+    type Error = Unsupported;
 
-            video_id.map(|video_id| PlatformLink::YoutubeVideo {
-                video_id,
-                timestamp,
-            })
+    fn try_from(url: Url) -> Result<Self, Self::Error> {
+        if url.scheme() != "https" && url.scheme() != "http" {
+            return Err(Unsupported);
         }
-        Some("youtu.be") => {
-            if let [Some(video_id), None] = url
-                .path_segments()
-                .map(|it| it.filter(|s| !s.is_empty()))
-                .map(|mut it| [it.next(), it.next()])
-                .unwrap_or([None; 2])
-            {
+
+        match url.domain() {
+            Some("instagram.com") | Some("www.instagram.com") => {
+                match url
+                    .path_segments()
+                    .map(|it| it.filter(|s| !s.is_empty()))
+                    .map(|mut it| [it.next(), it.next(), it.next()])
+                    .unwrap_or([None; 3])
+                {
+                    [Some("reel"), Some(reel_id), None] => {
+                        Ok(PlatformLink::InstagramReel(reel_id.to_string()))
+                    }
+                    [Some("p"), Some(post_id), None] => {
+                        Ok(PlatformLink::InstagramPost(post_id.to_string()))
+                    }
+                    [Some(profile_id), None, _] => {
+                        Ok(PlatformLink::InstagramProfile(profile_id.to_string()))
+                    }
+                    _ => Err(Unsupported),
+                }
+            }
+            Some("youtube.com") | Some("www.youtube.com") if url.path() == "/watch" => {
+                let mut video_id = None;
                 let mut timestamp = None;
                 for (key, value) in url.query_pairs() {
-                    if let Cow::Borrowed("t") = key {
-                        timestamp = value.parse().ok()
+                    match key {
+                        Cow::Borrowed("v") => video_id = Some(value.to_string()),
+                        Cow::Borrowed("t") => timestamp = value.parse().ok(),
+                        _ => {}
                     }
                 }
 
-                Some(PlatformLink::YoutubeVideo {
-                    video_id: video_id.to_string(),
-                    timestamp,
-                })
-            } else {
-                None
-            }
-        }
-        Some("reddit.com") | Some("www.reddit.com") => {
-            match url
-                .path_segments()
-                .map(|it| it.filter(|s| !s.is_empty()))
-                .map(|mut it| [None; 7].map(|_: Option<&str>| it.next()))
-                .unwrap_or([None; 7])
-            {
-                // /r/<subreddit>/s/<share_id>
-                [Some("r"), Some(subreddit), Some("s"), Some(share_id), None, ..] => {
-                    Some(PlatformLink::RedditShareLink {
-                        subreddit: subreddit.to_string(),
-                        share_id: share_id.to_string(),
+                video_id
+                    .map(|video_id| PlatformLink::YoutubeVideo {
+                        video_id,
+                        timestamp,
                     })
-                }
-                // /r/<subreddit>/comments/<post_id>/comment/<comment_id>
-                [Some("r"), Some(subreddit), Some("comments"), Some(post_id), Some("comment"), Some(comment_id), None] => {
-                    Some(PlatformLink::RedditPost {
-                        subreddit: subreddit.to_string(),
-                        post_id: post_id.to_string(),
-                        comment_id: Some(comment_id.to_string()),
-                    })
-                }
-                // /r/<subreddit>/comments/<post_id>/<perhaps post name>
-                [Some("r"), Some(subreddit), Some("comments"), Some(post_id), Some(_), None, ..]
-                | [Some("r"), Some(subreddit), Some("comments"), Some(post_id), None, ..] => {
-                    Some(PlatformLink::RedditPost {
-                        subreddit: subreddit.to_string(),
-                        post_id: post_id.to_string(),
-                        comment_id: None,
-                    })
-                }
-                _ => None,
+                    .ok_or(Unsupported)
             }
-        }
-        Some("twitter.com") | Some("www.twitter.com") | Some("x.com") | Some("www.x.com") => {
-            if let [Some(username), Some("status"), Some(status_id), None] = url
-                .path_segments()
-                .map(|it| it.filter(|s| !s.is_empty()))
-                .map(|mut it| [None; 4].map(|_: Option<&str>| it.next()))
-                .unwrap_or([None; 4])
-            {
-                Some(PlatformLink::Tweet {
-                    username: username.to_string(),
-                    status_id: status_id.parse().ok()?,
-                })
-            } else {
-                None
+            Some("youtu.be") => {
+                if let [Some(video_id), None] = url
+                    .path_segments()
+                    .map(|it| it.filter(|s| !s.is_empty()))
+                    .map(|mut it| [it.next(), it.next()])
+                    .unwrap_or([None; 2])
+                {
+                    let mut timestamp = None;
+                    for (key, value) in url.query_pairs() {
+                        if let Cow::Borrowed("t") = key {
+                            timestamp = value.parse().ok()
+                        }
+                    }
+
+                    Ok(PlatformLink::YoutubeVideo {
+                        video_id: video_id.to_string(),
+                        timestamp,
+                    })
+                } else {
+                    Err(Unsupported)
+                }
             }
+            Some("reddit.com") | Some("www.reddit.com") => {
+                match url
+                    .path_segments()
+                    .map(|it| it.filter(|s| !s.is_empty()))
+                    .map(|mut it| [None; 7].map(|_: Option<&str>| it.next()))
+                    .unwrap_or([None; 7])
+                {
+                    // /r/<subreddit>/s/<share_id>
+                    [Some("r"), Some(subreddit), Some("s"), Some(share_id), None, ..] => {
+                        Ok(PlatformLink::RedditShareLink {
+                            subreddit: subreddit.to_string(),
+                            share_id: share_id.to_string(),
+                        })
+                    }
+                    // /r/<subreddit>/comments/<post_id>/comment/<comment_id>
+                    [Some("r"), Some(subreddit), Some("comments"), Some(post_id), Some("comment"), Some(comment_id), None] => {
+                        Ok(PlatformLink::RedditPost {
+                            subreddit: subreddit.to_string(),
+                            post_id: post_id.to_string(),
+                            comment_id: Some(comment_id.to_string()),
+                        })
+                    }
+                    // /r/<subreddit>/comments/<post_id>/<perhaps post name>
+                    [Some("r"), Some(subreddit), Some("comments"), Some(post_id), Some(_), None, ..]
+                    | [Some("r"), Some(subreddit), Some("comments"), Some(post_id), None, ..] => {
+                        Ok(PlatformLink::RedditPost {
+                            subreddit: subreddit.to_string(),
+                            post_id: post_id.to_string(),
+                            comment_id: None,
+                        })
+                    }
+                    _ => Err(Unsupported),
+                }
+            }
+            Some("twitter.com") | Some("www.twitter.com") | Some("x.com") | Some("www.x.com") => {
+                if let [Some(username), Some("status"), Some(status_id), None] = url
+                    .path_segments()
+                    .map(|it| it.filter(|s| !s.is_empty()))
+                    .map(|mut it| [None; 4].map(|_: Option<&str>| it.next()))
+                    .unwrap_or([None; 4])
+                {
+                    Ok(PlatformLink::Tweet {
+                        username: username.to_string(),
+                        status_id: status_id.parse().map_err(|_| Unsupported)?,
+                    })
+                } else {
+                    Err(Unsupported)
+                }
+            }
+            _ => Err(Unsupported),
         }
-        _ => None,
     }
 }
 
