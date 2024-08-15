@@ -8,6 +8,9 @@ use serenity::{
 mod msg_command;
 pub(crate) use msg_command::MsgCommand;
 
+mod slash_command;
+pub(crate) use slash_command::SlashCommand;
+
 #[async_trait]
 pub trait RRCommandInteraction {
     fn name(&self) -> String;

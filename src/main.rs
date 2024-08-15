@@ -8,7 +8,7 @@ use serenity::prelude::*;
 mod links;
 
 mod interactions;
-use interactions::{MsgCommand, RRCommandInteraction};
+use interactions::{MsgCommand, RRCommandInteraction, SlashCommand};
 
 #[tokio::main]
 async fn main() {
@@ -32,7 +32,7 @@ struct Handler {
 impl Handler {
     fn new() -> Self {
         Self {
-            command_interactions: vec![Box::new(MsgCommand)],
+            command_interactions: vec![Box::new(MsgCommand), Box::new(SlashCommand)],
         }
     }
 }
