@@ -3,7 +3,8 @@ use std::{borrow::Cow, fmt::Display};
 use linkify::{LinkFinder, LinkKind};
 use url::Url;
 
-use crate::reddit::{alternative_reddit_links, resolve_reddit_share_link};
+mod reddit;
+use reddit::{alternative_reddit_links, resolve_reddit_share_link};
 
 pub enum Link {
     Simple(String),

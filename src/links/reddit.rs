@@ -3,7 +3,7 @@
 use reqwest::{header::LOCATION, redirect, Client};
 use url::Url;
 
-use crate::links::{get_platform_link, Link, PlatformLink};
+use super::{get_platform_link, Link, PlatformLink};
 
 pub async fn resolve_reddit_share_link(subreddit: &str, share_id: &str) -> Option<PlatformLink> {
     let client = Client::builder()

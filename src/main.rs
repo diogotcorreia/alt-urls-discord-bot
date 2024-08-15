@@ -10,7 +10,6 @@ use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 
 mod links;
-mod reddit;
 
 const COMMAND_NAME: &str = "Alt URLs";
 
