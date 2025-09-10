@@ -97,6 +97,7 @@ impl PlatformLink {
                 Link::Embed(format!(
                     "https://fxtwitter.com/{username}/status/{status_id}"
                 )),
+                Link::Simple(format!("https://xcancel.com/{username}/status/{status_id}")),
                 Link::Simple(format!("https://x.com/{username}/status/{status_id}")),
             ],
         }
