@@ -48,11 +48,11 @@ impl PlatformLink {
     pub async fn alternative_links(self) -> Vec<Link> {
         match self {
             PlatformLink::InstagramReel(reel_id) => vec![
-                Link::Embed(format!("https://g.embedez.com/reel/{reel_id}/")),
+                Link::Embed(format!("https://www.kkinstagram.com/reel/{reel_id}/")),
                 Link::Simple(format!("https://www.instagram.com/reel/{reel_id}/")),
             ],
             PlatformLink::InstagramPost(post_id) => vec![
-                Link::Simple(format!("https://g.embedez.com/p/{post_id}/")),
+                Link::Simple(format!("https://www.kkinstagram.com/p/{post_id}/")),
                 Link::Simple(format!("https://www.instagram.com/p/{post_id}/")),
             ],
             PlatformLink::InstagramProfile(username) => vec![Link::Simple(format!(
